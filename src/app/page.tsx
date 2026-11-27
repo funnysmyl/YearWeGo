@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from "react";
@@ -11,24 +10,36 @@ import { useSpotifyAuth } from "@/hooks/useSpotifyAuth";
 
 import { useSpotifyPlayer } from "@/hooks/useSpotifyPlayer";
 
+/**
+ * Anzeige-Texte und Farben für den Player-Status.
+ */
+const PLAYER_STATUS = {
+  idle: { label: "Nicht gestartet", color: "#6e7180" },
+  loading: { label: "Wird gestartet …", color: "#f7c843" },
+  ready: { label: "Bereit", color: "#4fae3a" },
+  not_ready: { label: "Offline", color: "#e08a35" },
+  error: { label: "Fehler", color: "#c43c35" },
+} as const;
+
 export default function Home() {
-  const {
-    accessToken,
-    isAuthenticated,
-  } = useSpotifyAuth();
+  /**
+   * Einzige Instanz des Auth-Hooks.
+   * Wird an SpotifyAuth weitergegeben, damit alle
+   * Bereiche denselben Anmeldestatus verwenden.
+   */
+  const auth = useSpotifyAuth();
 
   const {
     status: playerStatus,
-    deviceId,
     error: playerError,
     initializePlayer,
-  } = useSpotifyPlayer(accessToken);
+  } = useSpotifyPlayer(auth.accessToken);
 
   const [showScanner, setShowScanner] = useState(false);
 
-  const [scannedCode, setScannedCode] = useState<string | null>(
-    null,
-  );
+  const [scannedCode, setScannedCode] = useState<string | null>(null);
+
+  const currentPlayerStatus = PLAYER_STATUS[playerStatus];
 
   /**
    * Erfolgreicher QR-Code-Scan.
@@ -46,123 +57,102 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center bg-gray-950 px-4 py-12 text-white">
-      <div className="w-full max-w-3xl">
-        <header className="mb-10 text-center">
-          <h1 className="text-4xl font-extrabold tracking-tight">
-            Hitster DIY
-          </h1>
+    <div className="flex min-h-screen flex-col">
+      <main className="flex flex-1 flex-col items-center px-4 pt-[max(3.5rem,env(safe-area-inset-top))] pb-12">
+        <div className="w-full max-w-md">
+          <header className="mb-10 text-center">
+            <h1 className="px-title text-5xl sm:text-6xl">YearWeGo</h1>
+          </header>
 
-          <p className="mt-3 text-gray-400">
-            Deine Musik. Deine Karten. Dein Spiel.
-          </p>
-        </header>
+          <div className="flex flex-col gap-8">
+            <SpotifyAuth auth={auth} />
 
-        <div className="flex flex-col items-center gap-8">
-          <SpotifyAuth />
+            {auth.isAuthenticated && (
+              <section className="px-panel p-6">
+                <h2 className="px-heading mb-4 text-xl">Spotify-Player</h2>
 
-          {isAuthenticated && (
-            <section className="w-full max-w-md rounded-2xl border border-gray-700 bg-gray-900 p-6">
-              <h2 className="mb-4 text-xl font-bold">
-                Spotify Player
-              </h2>
+                <div className="px-slot mb-5 flex items-center gap-3 p-4">
+                  <span
+                    className="px-dot"
+                    style={{ backgroundColor: currentPlayerStatus.color }}
+                    aria-hidden="true"
+                  />
 
-              <div className="mb-5 rounded-lg bg-gray-800 p-4">
-                <p className="text-sm text-gray-400">
-                  Player-Status
-                </p>
+                  <p className="text-mist">
+                    Status:{" "}
+                    <span className="font-semibold text-white">
+                      {currentPlayerStatus.label}
+                    </span>
+                  </p>
+                </div>
 
-                <p className="mt-1 font-medium">
-                  {playerStatus}
-                </p>
-
-                {deviceId && (
-                  <p className="mt-2 break-all text-xs text-gray-500">
-                    Device ID: {deviceId}
+                {playerError && (
+                  <p role="alert" className="px-alert mb-5 p-4 text-sm">
+                    {playerError}
                   </p>
                 )}
-              </div>
 
-              {playerError && (
-                <p
-                  role="alert"
-                  className="mb-4 text-sm text-red-400"
-                >
-                  {playerError}
-                </p>
-              )}
-
-              <button
-                onClick={initializePlayer}
-                disabled={
-                  playerStatus === "loading" ||
-                  playerStatus === "ready"
-                }
-                className="w-full rounded-lg bg-green-500 px-4 py-3 font-semibold text-black transition hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {playerStatus === "loading"
-                  ? "Player wird initialisiert ..."
-                  : playerStatus === "ready"
-                    ? "Player bereit"
-                    : "Spotify Player initialisieren"}
-              </button>
-            </section>
-          )}
-
-          {isAuthenticated && (
-            <section className="w-full max-w-md">
-              {!showScanner ? (
                 <button
-                  onClick={() => setShowScanner(true)}
-                  className="w-full rounded-xl bg-blue-600 px-6 py-4 text-lg font-bold transition hover:bg-blue-500"
+                  onClick={initializePlayer}
+                  disabled={
+                    playerStatus === "loading" || playerStatus === "ready"
+                  }
+                  className="px-btn px-btn-grass"
                 >
-                  Karte scannen
+                  {playerStatus === "loading"
+                    ? "Player startet …"
+                    : playerStatus === "ready"
+                      ? "Player bereit"
+                      : "Player starten"}
                 </button>
-              ) : (
-                <QRScanner
-                  onScan={handleScan}
-                  onError={(error) => {
-                    console.error("QR-Scanner:", error);
+              </section>
+            )}
+
+            {auth.isAuthenticated && (
+              <section>
+                {!showScanner ? (
+                  <button
+                    onClick={() => setShowScanner(true)}
+                    className="px-btn px-btn-mana py-5 text-xl"
+                  >
+                    Karte scannen
+                  </button>
+                ) : (
+                  <QRScanner
+                    onScan={handleScan}
+                    onError={(error) => {
+                      console.error("QR-Scanner:", error);
+                    }}
+                    onClose={handleScannerClose}
+                  />
+                )}
+              </section>
+            )}
+
+            {scannedCode && (
+              <section className="px-panel p-6">
+                <h2 className="px-heading mb-4 text-lg">QR-Code erkannt</h2>
+
+                <p className="px-slot p-4 font-mono text-sm break-all text-gold">
+                  {scannedCode}
+                </p>
+
+                <button
+                  onClick={() => {
+                    setScannedCode(null);
+                    setShowScanner(true);
                   }}
-                  onClose={handleScannerClose}
-                />
-              )}
-            </section>
-          )}
-
-          {scannedCode && (
-            <section className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 p-6">
-              <h2 className="mb-3 text-lg font-bold">
-                QR-Code erkannt
-              </h2>
-
-              <p className="break-all rounded-lg bg-gray-800 p-4 font-mono text-sm text-green-400">
-                {scannedCode}
-              </p>
-
-              <button
-                onClick={() => {
-                  setScannedCode(null);
-                  setShowScanner(true);
-                }}
-                className="mt-4 w-full rounded-lg border border-gray-600 px-4 py-3 text-sm transition hover:bg-gray-800"
-              >
-                Nächste Karte scannen
-              </button>
-            </section>
-          )}
+                  className="px-btn px-btn-wood mt-6"
+                >
+                  Nächste Karte scannen
+                </button>
+              </section>
+            )}
+          </div>
         </div>
+      </main>
 
-        <footer className="mt-16 text-center text-xs text-gray-600">
-          Hitster DIY – Private Music Game
-        </footer>
-      </div>
-    </main>
+      <footer className="px-ground" aria-hidden="true" />
+    </div>
   );
 }
-
-
-
-
-// import Image from "next/image";
-
