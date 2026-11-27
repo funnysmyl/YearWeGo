@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@spotify/web-api-ts-sdk": "^1.2.0",
+    "@types/spotify-web-playback-sdk": "^0.1.19",
+    "html5-qrcode": "^2.3.8",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -20,6 +23,8 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "prettier": "^3.10.1",
+    "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "4.3.3",
     "typescript": "^5"
   }
