@@ -1,15 +1,41 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+
 import {
   createSpotifyAuthorizationUrl,
   generateState,
+  getMissingSpotifyConfig,
 } from "@/lib/spotify/auth";
+
+/**
+ * Leitet mit einem Fehlercode zurück zur Startseite.
+ * Die Startseite übersetzt den Code in eine lesbare Meldung.
+ */
+function redirectWithAuthError(
+  request: NextRequest,
+  code: string,
+): NextResponse {
+  return NextResponse.redirect(
+    new URL(`/?authError=${encodeURIComponent(code)}`, request.url),
+  );
+}
 
 /**
  * Startet die Spotify-Authentifizierung.
  *
  * GET /api/auth/login
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const missing = getMissingSpotifyConfig();
+
+  if (missing.length > 0) {
+    console.error(
+      "Spotify Login nicht möglich. Fehlende Umgebungsvariablen:",
+      missing.join(", "),
+    );
+
+    return redirectWithAuthError(request, "config_missing");
+  }
+
   try {
     const state = generateState();
 
@@ -35,13 +61,6 @@ export async function GET(): Promise<NextResponse> {
   } catch (error) {
     console.error("Spotify Login Fehler:", error);
 
-    return NextResponse.json(
-      {
-        error: "Spotify-Anmeldung konnte nicht gestartet werden.",
-      },
-      {
-        status: 500,
-      },
-    );
+    return redirectWithAuthError(request, "server_error");
   }
 }

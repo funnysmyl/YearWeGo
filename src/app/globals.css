@@ -8,11 +8,6 @@
   --sky-mid: #2b4c9b;
   --sky-bottom: #6fa8dc;
 
-  --grass: #4fae3a;
-  --grass-dark: #3a8a2a;
-  --dirt: #7a4b26;
-  --dirt-dark: #64391b;
-
   --ink: #0b0b14;
   --gold: #f7c843;
 
@@ -233,22 +228,5 @@ body::before {
   .px-btn-small {
     padding: 0.55rem 0.9rem;
     font-size: 0.9rem;
-  }
-
-  /**
-   * Boden am Seitenende: Grasschicht über Erdblöcken.
-   */
-  .px-ground {
-    height: calc(72px + env(safe-area-inset-bottom));
-    box-shadow: 0 -3px 0 var(--ink);
-    background:
-      repeating-linear-gradient(
-          90deg,
-          var(--grass) 0 12px,
-          var(--grass-dark) 12px 24px
-        )
-        top / 100% 12px no-repeat,
-      repeating-conic-gradient(var(--dirt) 0 25%, var(--dirt-dark) 0 50%) 0
-        12px / 24px 24px;
   }
 }

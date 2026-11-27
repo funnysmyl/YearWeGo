@@ -57,102 +57,96 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <main className="flex flex-1 flex-col items-center px-4 pt-[max(3.5rem,env(safe-area-inset-top))] pb-12">
-        <div className="w-full max-w-md">
-          <header className="mb-10 text-center">
-            <h1 className="px-title text-5xl sm:text-6xl">YearWeGo</h1>
-          </header>
+    <main className="flex min-h-screen flex-col items-center px-4 pt-[max(3.5rem,env(safe-area-inset-top))] pb-[max(3rem,env(safe-area-inset-bottom))]">
+      <div className="w-full max-w-md">
+        <header className="mb-10 text-center">
+          <h1 className="px-title text-5xl sm:text-6xl">YearWeGo</h1>
+        </header>
 
-          <div className="flex flex-col gap-8">
-            <SpotifyAuth auth={auth} />
+        <div className="flex flex-col gap-8">
+          <SpotifyAuth auth={auth} />
 
-            {auth.isAuthenticated && (
-              <section className="px-panel p-6">
-                <h2 className="px-heading mb-4 text-xl">Spotify-Player</h2>
+          {auth.isAuthenticated && (
+            <section className="px-panel p-6">
+              <h2 className="px-heading mb-4 text-xl">Spotify-Player</h2>
 
-                <div className="px-slot mb-5 flex items-center gap-3 p-4">
-                  <span
-                    className="px-dot"
-                    style={{ backgroundColor: currentPlayerStatus.color }}
-                    aria-hidden="true"
-                  />
+              <div className="px-slot mb-5 flex items-center gap-3 p-4">
+                <span
+                  className="px-dot"
+                  style={{ backgroundColor: currentPlayerStatus.color }}
+                  aria-hidden="true"
+                />
 
-                  <p className="text-mist">
-                    Status:{" "}
-                    <span className="font-semibold text-white">
-                      {currentPlayerStatus.label}
-                    </span>
-                  </p>
-                </div>
-
-                {playerError && (
-                  <p role="alert" className="px-alert mb-5 p-4 text-sm">
-                    {playerError}
-                  </p>
-                )}
-
-                <button
-                  onClick={initializePlayer}
-                  disabled={
-                    playerStatus === "loading" || playerStatus === "ready"
-                  }
-                  className="px-btn px-btn-grass"
-                >
-                  {playerStatus === "loading"
-                    ? "Player startet …"
-                    : playerStatus === "ready"
-                      ? "Player bereit"
-                      : "Player starten"}
-                </button>
-              </section>
-            )}
-
-            {auth.isAuthenticated && (
-              <section>
-                {!showScanner ? (
-                  <button
-                    onClick={() => setShowScanner(true)}
-                    className="px-btn px-btn-mana py-5 text-xl"
-                  >
-                    Karte scannen
-                  </button>
-                ) : (
-                  <QRScanner
-                    onScan={handleScan}
-                    onError={(error) => {
-                      console.error("QR-Scanner:", error);
-                    }}
-                    onClose={handleScannerClose}
-                  />
-                )}
-              </section>
-            )}
-
-            {scannedCode && (
-              <section className="px-panel p-6">
-                <h2 className="px-heading mb-4 text-lg">QR-Code erkannt</h2>
-
-                <p className="px-slot p-4 font-mono text-sm break-all text-gold">
-                  {scannedCode}
+                <p className="text-mist">
+                  Status:{" "}
+                  <span className="font-semibold text-white">
+                    {currentPlayerStatus.label}
+                  </span>
                 </p>
+              </div>
 
+              {playerError && (
+                <p role="alert" className="px-alert mb-5 p-4 text-sm">
+                  {playerError}
+                </p>
+              )}
+
+              <button
+                onClick={initializePlayer}
+                disabled={playerStatus === "loading" || playerStatus === "ready"}
+                className="px-btn px-btn-grass"
+              >
+                {playerStatus === "loading"
+                  ? "Player startet …"
+                  : playerStatus === "ready"
+                    ? "Player bereit"
+                    : "Player starten"}
+              </button>
+            </section>
+          )}
+
+          {auth.isAuthenticated && (
+            <section>
+              {!showScanner ? (
                 <button
-                  onClick={() => {
-                    setScannedCode(null);
-                    setShowScanner(true);
-                  }}
-                  className="px-btn px-btn-wood mt-6"
+                  onClick={() => setShowScanner(true)}
+                  className="px-btn px-btn-mana py-5 text-xl"
                 >
-                  Nächste Karte scannen
+                  Karte scannen
                 </button>
-              </section>
-            )}
-          </div>
-        </div>
-      </main>
+              ) : (
+                <QRScanner
+                  onScan={handleScan}
+                  onError={(error) => {
+                    console.error("QR-Scanner:", error);
+                  }}
+                  onClose={handleScannerClose}
+                />
+              )}
+            </section>
+          )}
 
-      <footer className="px-ground" aria-hidden="true" />
-    </div>
+          {scannedCode && (
+            <section className="px-panel p-6">
+              <h2 className="px-heading mb-4 text-lg">QR-Code erkannt</h2>
+
+              <p className="px-slot p-4 font-mono text-sm break-all text-gold">
+                {scannedCode}
+              </p>
+
+              <button
+                onClick={() => {
+                  setScannedCode(null);
+                  setShowScanner(true);
+                }}
+                className="px-btn px-btn-wood mt-6"
+              >
+                Nächste Karte scannen
+              </button>
+            </section>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
