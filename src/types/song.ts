@@ -1,5 +1,12 @@
 /**
- * Repräsentiert einen Song innerhalb der Hitster-App.
+ * Spotify-URI eines Tracks.
+ *
+ * Format: spotify:track:<Spotify-Track-ID>
+ */
+export type SpotifyTrackUri = `spotify:track:${string}`;
+
+/**
+ * Repräsentiert einen Song innerhalb der App.
  *
  * Die qrCodeId identifiziert die physische Spielkarte.
  * Die spotifyTrackUri identifiziert den zugehörigen Spotify-Track.
@@ -19,10 +26,8 @@ export type Song = {
 
   /**
    * Spotify-URI des Songs.
-   *
-   * Format: spotify:track:<Spotify-Track-ID>
    */
-  spotifyTrackUri: `spotify:track:${string}`;
+  spotifyTrackUri: SpotifyTrackUri;
 
   /**
    * Titel des Songs.

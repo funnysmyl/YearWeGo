@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  SpotifyApiError,
+  fetchAccessToken,
+  playTrackOnDevice,
+} from "@/lib/spotify/client";
+
+import type { SpotifyTrackUri } from "@/types/song";
+
 export type PlayerStatus = "idle" | "loading" | "ready" | "not_ready" | "error";
 
 type UseSpotifyPlayerReturn = {
@@ -9,8 +17,37 @@ type UseSpotifyPlayerReturn = {
   deviceId: string | null;
   status: PlayerStatus;
   error: string | null;
+
+  /**
+   * Läuft gerade Musik?
+   */
+  isPlaying: boolean;
+
+  /**
+   * Aktueller Track laut Player.
+   * Wird im einfachen Modus nicht angezeigt (Spoilerschutz),
+   * steht aber für spätere Spielmodi bereit.
+   */
+  currentTrack: SpotifyWebPlaybackTrack | null;
+
   initializePlayer: () => Promise<void>;
   disconnectPlayer: () => void;
+
+  /**
+   * Schaltet die Tonausgabe auf Mobilgeräten frei.
+   * Muss direkt in einem Tipp-Ereignis aufgerufen werden.
+   * Danach darf der Song auch ohne weiteren Tipp starten.
+   */
+  primePlayback: () => void;
+
+  /**
+   * Spielt einen Track von Anfang an ab.
+   * Gibt true zurück, wenn Spotify den Befehl angenommen hat.
+   */
+  playTrack: (trackUri: SpotifyTrackUri) => Promise<boolean>;
+
+  pausePlayback: () => Promise<void>;
+  resumePlayback: () => Promise<void>;
 };
 
 const SDK_URL = "https://sdk.scdn.co/spotify-player.js";
@@ -28,12 +65,27 @@ const PLAYER_ERROR_MESSAGES: Record<SpotifyPlayerErrorEvent, string> = {
   playback_error: "Der Song konnte nicht abgespielt werden.",
 };
 
+/**
+ * Wandelt Fehler beim Abspielen in eine verständliche Meldung um.
+ */
+function getPlaybackErrorMessage(err: unknown): string {
+  if (err instanceof SpotifyApiError) {
+    return err.message;
+  }
+
+  if (err instanceof TypeError) {
+    return "Keine Verbindung. Prüfe deine Internetverbindung.";
+  }
+
+  return "Der Song konnte nicht gestartet werden.";
+}
+
 export function useSpotifyPlayer(
   accessToken: string | null,
 ): UseSpotifyPlayerReturn {
   const playerRef = useRef<SpotifyWebPlaybackPlayer | null>(null);
 
-  const accessTokenRef = useRef<string | null>(accessToken);
+  const deviceIdRef = useRef<string | null>(null);
 
   const [player, setPlayer] = useState<SpotifyWebPlaybackPlayer | null>(null);
 
@@ -43,14 +95,10 @@ export function useSpotifyPlayer(
 
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * Access Token aktuell halten.
-   *
-   * Das SDK kann den Token-Callback auch später erneut aufrufen.
-   */
-  useEffect(() => {
-    accessTokenRef.current = accessToken;
-  }, [accessToken]);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const [currentTrack, setCurrentTrack] =
+    useState<SpotifyWebPlaybackTrack | null>(null);
 
   /**
    * Spotify SDK dynamisch laden.
@@ -107,7 +155,7 @@ export function useSpotifyPlayer(
    * Spotify Player initialisieren und verbinden.
    */
   const initializePlayer = useCallback(async (): Promise<void> => {
-    if (!accessTokenRef.current) {
+    if (!accessToken) {
       setError("Bitte melde dich zuerst bei Spotify an.");
       setStatus("error");
       return;
@@ -137,24 +185,9 @@ export function useSpotifyPlayer(
             /**
              * Immer einen aktuellen Token vom Backend anfordern.
              */
-            const response = await fetch("/api/auth/token", {
-              credentials: "same-origin",
-              cache: "no-store",
-            });
+            const token = await fetchAccessToken();
 
-            if (!response.ok) {
-              throw new Error(`Token-Abruf fehlgeschlagen (HTTP ${response.status})`);
-            }
-
-            const data = (await response.json()) as { access_token?: string };
-
-            if (!data.access_token) {
-              throw new Error("Antwort enthielt keinen Access Token.");
-            }
-
-            accessTokenRef.current = data.access_token;
-
-            callback(data.access_token);
+            callback(token);
           } catch (err) {
             /**
              * Ohne Token kann das SDK nicht weiterarbeiten.
@@ -170,6 +203,8 @@ export function useSpotifyPlayer(
       });
 
       newPlayer.addListener("ready", ({ device_id }) => {
+        deviceIdRef.current = device_id;
+
         setDeviceId(device_id);
         setError(null);
         setStatus("ready");
@@ -178,8 +213,23 @@ export function useSpotifyPlayer(
       newPlayer.addListener("not_ready", ({ device_id }) => {
         console.warn("Spotify Player offline:", device_id);
 
+        deviceIdRef.current = null;
+
         setDeviceId(null);
         setStatus("not_ready");
+      });
+
+      /**
+       * Wiedergabezustand verfolgen (läuft / pausiert / welcher Track).
+       */
+      newPlayer.addListener("player_state_changed", (state) => {
+        if (!state) {
+          setIsPlaying(false);
+          return;
+        }
+
+        setIsPlaying(!state.paused);
+        setCurrentTrack(state.track_window.current_track);
       });
 
       const errorEvents: SpotifyPlayerErrorEvent[] = [
@@ -207,7 +257,7 @@ export function useSpotifyPlayer(
 
       newPlayer.addListener("autoplay_failed", () => {
         setError(
-          "Der Browser hat die automatische Wiedergabe blockiert. Tippe bitte erneut auf Abspielen.",
+          "Der Browser hat den automatischen Start blockiert. Tippe auf „Abspielen“.",
         );
       });
 
@@ -226,12 +276,103 @@ export function useSpotifyPlayer(
 
       playerRef.current?.disconnect();
       playerRef.current = null;
+      deviceIdRef.current = null;
 
       setPlayer(null);
       setError(message);
       setStatus("error");
     }
-  }, [loadSpotifySDK]);
+  }, [accessToken, loadSpotifySDK]);
+
+  /**
+   * Tonausgabe freischalten (Mobilgeräte).
+   */
+  const primePlayback = useCallback((): void => {
+    const activePlayer = playerRef.current;
+
+    if (!activePlayer) {
+      return;
+    }
+
+    void activePlayer.activateElement().catch(() => undefined);
+  }, []);
+
+  /**
+   * Spielt einen Track von Anfang an ab.
+   */
+  const playTrack = useCallback(
+    async (trackUri: SpotifyTrackUri): Promise<boolean> => {
+      const activePlayer = playerRef.current;
+      const activeDeviceId = deviceIdRef.current;
+
+      if (!activePlayer || !activeDeviceId) {
+        setError("Der Spotify-Player ist noch nicht bereit.");
+        return false;
+      }
+
+      /**
+       * Wird dies direkt in einem Tipp-Ereignis aufgerufen,
+       * schaltet es die Tonausgabe frei. Außerhalb eines Tipps
+       * schadet der Aufruf nicht.
+       */
+      void activePlayer.activateElement().catch(() => undefined);
+
+      try {
+        setError(null);
+
+        await playTrackOnDevice(activeDeviceId, trackUri);
+
+        return true;
+      } catch (err) {
+        console.error("Wiedergabe fehlgeschlagen:", err);
+
+        setError(getPlaybackErrorMessage(err));
+
+        return false;
+      }
+    },
+    [],
+  );
+
+  /**
+   * Wiedergabe pausieren.
+   */
+  const pausePlayback = useCallback(async (): Promise<void> => {
+    const activePlayer = playerRef.current;
+
+    if (!activePlayer) {
+      return;
+    }
+
+    try {
+      await activePlayer.pause();
+    } catch (err) {
+      console.error("Pause fehlgeschlagen:", err);
+    }
+  }, []);
+
+  /**
+   * Wiedergabe fortsetzen.
+   */
+  const resumePlayback = useCallback(async (): Promise<void> => {
+    const activePlayer = playerRef.current;
+
+    if (!activePlayer) {
+      return;
+    }
+
+    void activePlayer.activateElement().catch(() => undefined);
+
+    try {
+      setError(null);
+
+      await activePlayer.resume();
+    } catch (err) {
+      console.error("Fortsetzen fehlgeschlagen:", err);
+
+      setError("Die Wiedergabe konnte nicht fortgesetzt werden.");
+    }
+  }, []);
 
   /**
    * Player sauber trennen.
@@ -239,13 +380,17 @@ export function useSpotifyPlayer(
   const disconnectPlayer = useCallback(() => {
     if (playerRef.current) {
       playerRef.current.disconnect();
-
-      playerRef.current = null;
-
-      setPlayer(null);
-      setDeviceId(null);
-      setStatus("idle");
     }
+
+    playerRef.current = null;
+    deviceIdRef.current = null;
+
+    setPlayer(null);
+    setDeviceId(null);
+    setIsPlaying(false);
+    setCurrentTrack(null);
+    setError(null);
+    setStatus("idle");
   }, []);
 
   /**
@@ -255,6 +400,7 @@ export function useSpotifyPlayer(
     return () => {
       playerRef.current?.disconnect();
       playerRef.current = null;
+      deviceIdRef.current = null;
     };
   }, []);
 
@@ -262,7 +408,7 @@ export function useSpotifyPlayer(
    * Player bei Abmeldung automatisch trennen.
    */
   useEffect(() => {
-    if (!accessToken) {
+    if (!accessToken && playerRef.current) {
       disconnectPlayer();
     }
   }, [accessToken, disconnectPlayer]);
@@ -272,7 +418,13 @@ export function useSpotifyPlayer(
     deviceId,
     status,
     error,
+    isPlaying,
+    currentTrack,
     initializePlayer,
     disconnectPlayer,
+    primePlayback,
+    playTrack,
+    pausePlayback,
+    resumePlayback,
   };
 }

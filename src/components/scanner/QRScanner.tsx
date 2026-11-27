@@ -5,7 +5,14 @@ import { Html5Qrcode } from "html5-qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type QRScannerProps = {
-  onScan: (decodedText: string) => void;
+  /**
+   * Wird bei jedem erkannten QR-Code aufgerufen.
+   *
+   * true  = Code angenommen, der Scanner wird geschlossen.
+   * false = Code abgelehnt, der Scanner sucht weiter und
+   *         ignoriert diesen Code ab jetzt.
+   */
+  onScan: (decodedText: string) => boolean;
 
   onError?: (error: string) => void;
 
@@ -65,10 +72,16 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
   const onErrorRef = useRef(onError);
 
   /**
-   * Verhindert, dass eine Karte mehrfach gemeldet wird,
+   * Verhindert, dass eine angenommene Karte mehrfach gemeldet wird,
    * weil der Scanner bis zu 10 Bilder pro Sekunde prüft.
    */
   const hasScannedRef = useRef(false);
+
+  /**
+   * Bereits abgelehnte Codes. Sie werden nicht erneut gemeldet,
+   * damit die Fehlermeldung nicht ständig neu erscheint.
+   */
+  const rejectedCodesRef = useRef<Set<string>>(new Set());
 
   /**
    * Warteschlange für Kamera-Operationen.
@@ -136,6 +149,7 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
     setError(null);
 
     hasScannedRef.current = false;
+    rejectedCodesRef.current.clear();
 
     let scanner: Html5Qrcode | null = null;
 
@@ -152,18 +166,22 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
         { facingMode: "environment" },
         SCANNER_CONFIG,
         (decodedText) => {
-          if (hasScannedRef.current) {
+          if (
+            hasScannedRef.current ||
+            rejectedCodesRef.current.has(decodedText)
+          ) {
             return;
           }
 
-          hasScannedRef.current = true;
+          const accepted = onScanRef.current(decodedText);
 
-          /**
-           * Erst Kamera stoppen, dann das Ergebnis melden.
-           */
-          void enqueue(stopCamera).then(() => {
-            onScanRef.current(decodedText);
-          });
+          if (accepted) {
+            hasScannedRef.current = true;
+
+            void enqueue(stopCamera);
+          } else {
+            rejectedCodesRef.current.add(decodedText);
+          }
         },
         () => {
           /**
