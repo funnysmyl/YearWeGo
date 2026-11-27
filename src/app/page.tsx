@@ -43,6 +43,7 @@ export default function Home() {
 
   /**
    * Erfolgreicher QR-Code-Scan.
+   * Der Scanner wird ausgeblendet, die Kamera stoppt dabei automatisch.
    */
   const handleScan = (decodedText: string) => {
     setScannedCode(decodedText);
@@ -54,6 +55,15 @@ export default function Home() {
    */
   const handleScannerClose = () => {
     setShowScanner(false);
+  };
+
+  /**
+   * Nächste Karte: Ergebnis entfernen und Scanner
+   * direkt wieder öffnen. Die Kamera startet automatisch.
+   */
+  const handleNextCard = () => {
+    setScannedCode(null);
+    setShowScanner(true);
   };
 
   return (
@@ -105,7 +115,7 @@ export default function Home() {
             </section>
           )}
 
-          {auth.isAuthenticated && (
+          {auth.isAuthenticated && !scannedCode && (
             <section>
               {!showScanner ? (
                 <button
@@ -135,11 +145,8 @@ export default function Home() {
               </p>
 
               <button
-                onClick={() => {
-                  setScannedCode(null);
-                  setShowScanner(true);
-                }}
-                className="px-btn px-btn-wood mt-6"
+                onClick={handleNextCard}
+                className="px-btn px-btn-mana mt-6 py-5 text-xl"
               >
                 Nächste Karte scannen
               </button>

@@ -12,6 +12,19 @@ type QRScannerProps = {
   onClose?: () => void;
 };
 
+type ScannerStatus = "starting" | "scanning" | "error";
+
+const SCANNER_ELEMENT_ID = "yearwego-qr-reader";
+
+const SCANNER_CONFIG = {
+  fps: 10,
+  qrbox: {
+    width: 250,
+    height: 250,
+  },
+  aspectRatio: 1,
+};
+
 /**
  * Übersetzt technische Kamera-Fehler in verständliche Meldungen.
  *
@@ -40,25 +53,34 @@ function getCameraErrorMessage(err: unknown): string {
   return "Die Kamera konnte nicht gestartet werden.";
 }
 
+/**
+ * QR-Code-Scanner, der die Kamera beim Erscheinen
+ * automatisch startet und beim Verschwinden stoppt.
+ */
 export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
-
-  const scannerContainerRef = useRef<HTMLDivElement | null>(null);
 
   const onScanRef = useRef(onScan);
 
   const onErrorRef = useRef(onError);
 
   /**
-   * Als Ref statt State, damit der Scan-Callback immer
-   * den aktuellen Wert sieht und eine Karte nicht
-   * mehrfach gemeldet wird.
+   * Verhindert, dass eine Karte mehrfach gemeldet wird,
+   * weil der Scanner bis zu 10 Bilder pro Sekunde prüft.
    */
   const hasScannedRef = useRef(false);
 
-  const [isScanning, setIsScanning] = useState(false);
+  /**
+   * Warteschlange für Kamera-Operationen.
+   *
+   * Starten und Stoppen laufen strikt nacheinander ab.
+   * Ohne diese Warteschlange könnte die Kamera doppelt
+   * geöffnet werden (z. B. durch den React Strict Mode
+   * in der Entwicklung oder schnelles Tippen).
+   */
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
 
-  const [isLoading, setIsLoading] = useState(false);
+  const [status, setStatus] = useState<ScannerStatus>("starting");
 
   const [error, setError] = useState<string | null>(null);
 
@@ -71,22 +93,27 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
   }, [onScan, onError]);
 
   /**
-   * Fehler zentral behandeln.
+   * Hängt eine Aufgabe an die Warteschlange an.
    */
-  const handleError = useCallback((message: string) => {
-    setError(message);
+  const enqueue = useCallback((task: () => Promise<void>): Promise<void> => {
+    const next = queueRef.current.then(task).catch((err: unknown) => {
+      console.error("QR-Scanner:", err);
+    });
 
-    onErrorRef.current?.(message);
+    queueRef.current = next;
+
+    return next;
   }, []);
 
   /**
-   * Scanner stoppen und Kamerazugriff freigeben.
+   * Kamera stoppen und Anzeige leeren.
    */
-  const stopScanner = useCallback(async () => {
+  const stopCamera = useCallback(async (): Promise<void> => {
     const scanner = scannerRef.current;
 
+    scannerRef.current = null;
+
     if (!scanner) {
-      setIsScanning(false);
       return;
     }
 
@@ -96,47 +123,26 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
       }
 
       scanner.clear();
-
-      scannerRef.current = null;
-
-      setIsScanning(false);
     } catch (err) {
       console.error("QR-Scanner konnte nicht gestoppt werden:", err);
-
-      handleError("Der Scanner konnte nicht vollständig beendet werden.");
     }
-  }, [handleError]);
+  }, []);
 
   /**
-   * QR-Code-Scanner starten.
+   * Kamera starten und auf QR-Codes warten.
    */
-  const startScanner = useCallback(async () => {
-    if (isLoading || isScanning) {
-      return;
-    }
-
-    setIsLoading(true);
+  const startCamera = useCallback(async (): Promise<void> => {
+    setStatus("starting");
     setError(null);
 
     hasScannedRef.current = false;
 
-    try {
-      if (!scannerContainerRef.current) {
-        throw new Error("Scanner-Element wurde nicht gefunden.");
-      }
+    let scanner: Html5Qrcode | null = null;
 
-      const scanner = new Html5Qrcode("yearwego-qr-reader");
+    try {
+      scanner = new Html5Qrcode(SCANNER_ELEMENT_ID);
 
       scannerRef.current = scanner;
-
-      const config = {
-        fps: 10,
-        qrbox: {
-          width: 250,
-          height: 250,
-        },
-        aspectRatio: 1,
-      };
 
       /**
        * "environment" wählt auf Smartphones
@@ -144,17 +150,20 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
        */
       await scanner.start(
         { facingMode: "environment" },
-        config,
-        async (decodedText) => {
+        SCANNER_CONFIG,
+        (decodedText) => {
           if (hasScannedRef.current) {
             return;
           }
 
           hasScannedRef.current = true;
 
-          await stopScanner();
-
-          onScanRef.current(decodedText);
+          /**
+           * Erst Kamera stoppen, dann das Ergebnis melden.
+           */
+          void enqueue(stopCamera).then(() => {
+            onScanRef.current(decodedText);
+          });
         },
         () => {
           /**
@@ -164,40 +173,59 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
         },
       );
 
-      setIsScanning(true);
+      setStatus("scanning");
     } catch (err) {
       console.error("QR-Scanner Fehler:", err);
 
-      handleError(getCameraErrorMessage(err));
+      scannerRef.current = null;
 
-      await stopScanner();
-    } finally {
-      setIsLoading(false);
+      try {
+        scanner?.clear();
+      } catch {
+        // Nichts zu bereinigen.
+      }
+
+      const message = getCameraErrorMessage(err);
+
+      setError(message);
+      setStatus("error");
+
+      onErrorRef.current?.(message);
     }
-  }, [handleError, isLoading, isScanning, stopScanner]);
+  }, [enqueue, stopCamera]);
 
   /**
-   * Scanner beim Verlassen der Komponente aufräumen.
+   * Kamera beim Erscheinen automatisch starten
+   * und beim Verschwinden wieder freigeben.
+   *
+   * "cancelled" sorgt dafür, dass ein Start übersprungen wird,
+   * wenn die Komponente schon wieder entfernt wurde, bevor
+   * die Warteschlange ihn ausführen konnte.
    */
   useEffect(() => {
-    return () => {
-      const scanner = scannerRef.current;
+    let cancelled = false;
 
-      if (scanner?.isScanning) {
-        void scanner.stop().catch((err) => {
-          console.error("Scanner Cleanup Fehler:", err);
-        });
+    void enqueue(async () => {
+      if (!cancelled) {
+        await startCamera();
       }
+    });
+
+    return () => {
+      cancelled = true;
+
+      void enqueue(stopCamera);
     };
-  }, []);
+  }, [enqueue, startCamera, stopCamera]);
 
   /**
-   * Scanner schließen.
+   * Nach einem Fehler erneut versuchen.
    */
-  const handleClose = async () => {
-    await stopScanner();
-
-    onClose?.();
+  const handleRetry = () => {
+    void enqueue(async () => {
+      await stopCamera();
+      await startCamera();
+    });
   };
 
   return (
@@ -210,11 +238,22 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
         </p>
       </div>
 
-      <div
-        ref={scannerContainerRef}
-        id="yearwego-qr-reader"
-        className="px-slot min-h-[280px] w-full overflow-hidden bg-black"
-      />
+      <div className="relative">
+        {/*
+          In dieses Element fügt html5-qrcode das Kamerabild ein.
+          Es darf deshalb keine React-Kindelemente enthalten.
+        */}
+        <div
+          id={SCANNER_ELEMENT_ID}
+          className="px-slot min-h-[280px] w-full overflow-hidden bg-black"
+        />
+
+        {status === "starting" && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <p className="px-heading text-mist">Kamera startet …</p>
+          </div>
+        )}
+      </div>
 
       {error && (
         <div role="alert" className="px-alert mt-5 p-4 text-sm">
@@ -223,22 +262,17 @@ export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) 
       )}
 
       <div className="mt-7 flex flex-col gap-5">
-        {!isScanning ? (
-          <button
-            onClick={startScanner}
-            disabled={isLoading}
-            className="px-btn px-btn-grass"
-          >
-            {isLoading ? "Kamera startet …" : "Kamera starten"}
-          </button>
-        ) : (
-          <button onClick={stopScanner} className="px-btn px-btn-stone">
-            Scannen abbrechen
+        {status === "error" && (
+          <button onClick={handleRetry} className="px-btn px-btn-grass">
+            Erneut versuchen
           </button>
         )}
 
-        <button onClick={handleClose} className="px-btn px-btn-wood px-btn-small">
-          Schließen
+        <button
+          onClick={() => onClose?.()}
+          className="px-btn px-btn-wood px-btn-small"
+        >
+          Abbrechen
         </button>
       </div>
     </div>
