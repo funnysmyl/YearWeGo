@@ -54,7 +54,7 @@ const SDK_URL = "https://sdk.scdn.co/spotify-player.js";
 
 /**
  * Verständliche Meldungen für die Fehler-Ereignisse des SDK.
- * Die technische Originalmeldung landet zusätzlich in der Konsole.
+ * Die technische Originalmeldung wird zur Fehlersuche angehängt.
  */
 const PLAYER_ERROR_MESSAGES: Record<SpotifyPlayerErrorEvent, string> = {
   initialization_error:
@@ -192,7 +192,7 @@ export function useSpotifyPlayer(
             /**
              * Ohne Token kann das SDK nicht weiterarbeiten.
              * Status sichtbar auf Fehler setzen, statt
-             * dauerhaft "Wird gestartet …" anzuzeigen.
+             * dauerhaft "Wird verbunden …" anzuzeigen.
              */
             console.error("Spotify Token Fehler:", err);
 
@@ -228,8 +228,18 @@ export function useSpotifyPlayer(
           return;
         }
 
-        setIsPlaying(!state.paused);
+        const playing = !state.paused;
+
+        setIsPlaying(playing);
         setCurrentTrack(state.track_window.current_track);
+
+        /**
+         * Läuft die Musik tatsächlich, sind ältere
+         * Fehlermeldungen überholt.
+         */
+        if (playing) {
+          setError(null);
+        }
       });
 
       const errorEvents: SpotifyPlayerErrorEvent[] = [
@@ -243,7 +253,15 @@ export function useSpotifyPlayer(
         newPlayer.addListener(eventName, ({ message }) => {
           console.error(`Spotify ${eventName}:`, message);
 
-          setError(PLAYER_ERROR_MESSAGES[eventName]);
+          /**
+           * Originalmeldung von Spotify anhängen,
+           * damit sich Ursachen eindeutig erkennen lassen.
+           */
+          setError(
+            message
+              ? `${PLAYER_ERROR_MESSAGES[eventName]} (Spotify: ${message})`
+              : PLAYER_ERROR_MESSAGES[eventName],
+          );
 
           /**
            * Ein Wiedergabefehler betrifft nur den einzelnen Song,
@@ -336,6 +354,9 @@ export function useSpotifyPlayer(
 
   /**
    * Wiedergabe pausieren.
+   *
+   * Nur wenn tatsächlich ein Song geladen ist. Eine Pause
+   * ins Leere löst im SDK sonst einen unnötigen playback_error aus.
    */
   const pausePlayback = useCallback(async (): Promise<void> => {
     const activePlayer = playerRef.current;
@@ -345,6 +366,12 @@ export function useSpotifyPlayer(
     }
 
     try {
+      const state = await activePlayer.getCurrentState();
+
+      if (!state || state.paused) {
+        return;
+      }
+
       await activePlayer.pause();
     } catch (err) {
       console.error("Pause fehlgeschlagen:", err);
