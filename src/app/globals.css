@@ -1,24 +1,254 @@
 @import "tailwindcss";
 
 /**
- * Die App verwendet ausschließlich ein dunkles Design.
- * Die Werte entsprechen Tailwind gray-950 / gray-50.
+ * Farbpalette im Pixel-Sandbox-Stil.
  */
 :root {
-  --background: #030712;
-  --foreground: #f9fafb;
+  --sky-top: #0f1a3d;
+  --sky-mid: #2b4c9b;
+  --sky-bottom: #6fa8dc;
+
+  --grass: #4fae3a;
+  --grass-dark: #3a8a2a;
+  --dirt: #7a4b26;
+  --dirt-dark: #64391b;
+
+  --ink: #0b0b14;
+  --gold: #f7c843;
+
   color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-pixel), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-pixel), ui-monospace, monospace;
+}
+
+/**
+ * Zusätzliche Farben als Tailwind-Klassen:
+ * text-gold, text-mist, bg-ink usw.
+ */
+@theme {
+  --color-gold: #f7c843;
+  --color-mist: #d6defa;
+  --color-ink: #0b0b14;
+}
+
+html {
+  background: var(--sky-top);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  color: #ffffff;
   -webkit-tap-highlight-color: transparent;
+}
+
+/**
+ * Nachthimmel mit Pixel-Sternen und eckigem Mond.
+ *
+ * Als fixiertes Pseudo-Element umgesetzt, weil
+ * "background-attachment: fixed" auf iOS nicht
+ * zuverlässig funktioniert.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(#f4f1d0, #f4f1d0) 86% 7% / 20px 20px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 8% 6% / 3px 3px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 23% 14% / 3px 3px no-repeat,
+    linear-gradient(#cfe0ff, #cfe0ff) 41% 4% / 3px 3px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 62% 11% / 3px 3px no-repeat,
+    linear-gradient(#fff6c8, #fff6c8) 74% 3% / 4px 4px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 94% 19% / 3px 3px no-repeat,
+    linear-gradient(#cfe0ff, #cfe0ff) 14% 27% / 3px 3px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 55% 22% / 3px 3px no-repeat,
+    linear-gradient(#ffffff, #ffffff) 33% 33% / 2px 2px no-repeat,
+    linear-gradient(
+      180deg,
+      var(--sky-top) 0%,
+      var(--sky-mid) 50%,
+      var(--sky-bottom) 100%
+    );
+}
+
+@layer components {
+  /**
+   * Goldener Titel mit dunkler Pixel-Kontur.
+   */
+  .px-title {
+    font-weight: 700;
+    color: var(--gold);
+    letter-spacing: 0.04em;
+    text-shadow:
+      -3px 0 0 var(--ink),
+      3px 0 0 var(--ink),
+      0 -3px 0 var(--ink),
+      0 3px 0 var(--ink),
+      -3px -3px 0 var(--ink),
+      3px -3px 0 var(--ink),
+      -3px 3px 0 var(--ink),
+      3px 3px 0 var(--ink),
+      6px 6px 0 rgba(0, 0, 0, 0.45);
+  }
+
+  /**
+   * Weiße Überschrift mit Pixel-Schatten.
+   */
+  .px-heading {
+    font-weight: 700;
+    color: #ffffff;
+    text-shadow: 2px 2px 0 var(--ink);
+  }
+
+  /**
+   * Inventar-artiges Panel mit doppeltem Rand.
+   */
+  .px-panel {
+    background: rgba(38, 54, 128, 0.88);
+    box-shadow:
+      inset 0 0 0 3px #0d1233,
+      inset 0 0 0 6px #5d78d6,
+      6px 6px 0 rgba(0, 0, 0, 0.45);
+  }
+
+  /**
+   * Vertiefter Slot innerhalb eines Panels.
+   */
+  .px-slot {
+    background: rgba(16, 24, 66, 0.8);
+    box-shadow:
+      inset 0 0 0 3px #0d1233,
+      inset 0 4px 0 3px rgba(0, 0, 0, 0.3);
+  }
+
+  /**
+   * Fehlermeldung.
+   */
+  .px-alert {
+    background: rgba(110, 20, 20, 0.9);
+    color: #ffe3df;
+    box-shadow:
+      inset 0 0 0 3px #2a0505,
+      inset 0 0 0 6px #e06a5f;
+  }
+
+  /**
+   * Erfolgsmeldung.
+   */
+  .px-success {
+    background: rgba(28, 84, 28, 0.9);
+    color: #e3ffd9;
+    box-shadow:
+      inset 0 0 0 3px #071f07,
+      inset 0 0 0 6px #7fd36a;
+  }
+
+  /**
+   * Quadratische Status-Anzeige.
+   */
+  .px-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    box-shadow: 0 0 0 2px var(--ink);
+  }
+
+  /**
+   * Blockiger Button mit Kanten-Effekt.
+   * Farbe wird über die Variante (--btn-bg) gesetzt.
+   */
+  .px-btn {
+    --btn-bg: #8b5a2b;
+
+    display: inline-flex;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    border: 0;
+    border-radius: 0;
+    background: var(--btn-bg);
+    color: #ffffff;
+    font-size: 1.05rem;
+    font-weight: 600;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+    cursor: pointer;
+    box-shadow:
+      inset -4px -4px 0 rgba(0, 0, 0, 0.35),
+      inset 4px 4px 0 rgba(255, 255, 255, 0.28),
+      0 0 0 3px var(--ink),
+      5px 5px 0 3px rgba(0, 0, 0, 0.45);
+    transition:
+      transform 60ms steps(1),
+      filter 60ms steps(1);
+  }
+
+  .px-btn:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  .px-btn:active:not(:disabled) {
+    transform: translate(3px, 3px);
+    box-shadow:
+      inset 4px 4px 0 rgba(0, 0, 0, 0.35),
+      inset -4px -4px 0 rgba(255, 255, 255, 0.15),
+      0 0 0 3px var(--ink),
+      2px 2px 0 3px rgba(0, 0, 0, 0.45);
+  }
+
+  .px-btn:disabled {
+    cursor: not-allowed;
+    filter: grayscale(0.7) brightness(0.8);
+  }
+
+  .px-btn:focus-visible {
+    outline: 3px solid var(--gold);
+    outline-offset: 5px;
+  }
+
+  .px-btn-grass {
+    --btn-bg: #4fae3a;
+  }
+
+  .px-btn-mana {
+    --btn-bg: #3d6fe0;
+  }
+
+  .px-btn-life {
+    --btn-bg: #c43c35;
+  }
+
+  .px-btn-wood {
+    --btn-bg: #8b5a2b;
+  }
+
+  .px-btn-stone {
+    --btn-bg: #6e7180;
+  }
+
+  .px-btn-small {
+    padding: 0.55rem 0.9rem;
+    font-size: 0.9rem;
+  }
+
+  /**
+   * Boden am Seitenende: Grasschicht über Erdblöcken.
+   */
+  .px-ground {
+    height: calc(72px + env(safe-area-inset-bottom));
+    box-shadow: 0 -3px 0 var(--ink);
+    background:
+      repeating-linear-gradient(
+          90deg,
+          var(--grass) 0 12px,
+          var(--grass-dark) 12px 24px
+        )
+        top / 100% 12px no-repeat,
+      repeating-conic-gradient(var(--dirt) 0 25%, var(--dirt-dark) 0 50%) 0
+        12px / 24px 24px;
+  }
 }

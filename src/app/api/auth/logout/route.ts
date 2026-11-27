@@ -1,41 +1,66 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+
+import {
+  createSpotifyAuthorizationUrl,
+  generateState,
+  getMissingSpotifyConfig,
+} from "@/lib/spotify/auth";
 
 /**
- * Beendet die lokale Spotify-Sitzung.
- *
- * POST /api/auth/logout
+ * Leitet mit einem Fehlercode zurück zur Startseite.
+ * Die Startseite übersetzt den Code in eine lesbare Meldung.
  */
-export async function POST(): Promise<NextResponse> {
-  const response = NextResponse.json({
-    success: true,
-    message: "Spotify-Sitzung wurde beendet.",
-  });
+function redirectWithAuthError(
+  request: NextRequest,
+  code: string,
+): NextResponse {
+  return NextResponse.redirect(
+    new URL(`/?authError=${encodeURIComponent(code)}`, request.url),
+  );
+}
 
-  response.cookies.set("spotify_access_token", "", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 0,
-  });
+/**
+ * Startet die Spotify-Authentifizierung.
+ *
+ * GET /api/auth/login
+ */
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const missing = getMissingSpotifyConfig();
 
-  response.cookies.set("spotify_refresh_token", "", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 0,
-  });
+  if (missing.length > 0) {
+    console.error(
+      "Spotify Login nicht möglich. Fehlende Umgebungsvariablen:",
+      missing.join(", "),
+    );
 
-  response.cookies.set("spotify_token_expires_at", "", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 0,
-  });
+    return redirectWithAuthError(request, "config_missing");
+  }
 
-  response.headers.set("Cache-Control", "no-store");
+  try {
+    const state = generateState();
 
-  return response;
+    const authorizationUrl = createSpotifyAuthorizationUrl(state);
+
+    const response = NextResponse.redirect(authorizationUrl);
+
+    /**
+     * State wird temporär in einem HttpOnly-Cookie gespeichert.
+     *
+     * Bei der Rückkehr von Spotify wird geprüft,
+     * ob der zurückgegebene State übereinstimmt.
+     */
+    response.cookies.set("spotify_auth_state", state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/api/auth",
+      maxAge: 600,
+    });
+
+    return response;
+  } catch (error) {
+    console.error("Spotify Login Fehler:", error);
+
+    return redirectWithAuthError(request, "server_error");
+  }
 }

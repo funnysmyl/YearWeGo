@@ -1,15 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Pixelify_Sans } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/**
+ * Pixel-Schrift für den gesamten Retro-Look.
+ * Der Subset "latin" enthält auch ä, ö, ü und ß.
+ */
+const pixelFont = Pixelify_Sans({
+  variable: "--font-pixel",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 /**
@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
  * von Suchmaschinen indexiert werden.
  */
 export const metadata: Metadata = {
-  title: "Hitster DIY",
+  title: "YearWeGo",
   description: "Privates Musikspiel mit eigenen Karten",
   robots: {
     index: false,
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    title: "Hitster DIY",
+    title: "YearWeGo",
     statusBarStyle: "black-translucent",
   },
   formatDetection: {
@@ -38,23 +38,20 @@ export const metadata: Metadata = {
 /**
  * Viewport-Einstellungen für Smartphones.
  *
- * themeColor entspricht dem dunklen Hintergrund der App,
+ * themeColor entspricht dem oberen Himmel-Farbton,
  * viewportFit sorgt für korrekte Darstellung auf iPhones
- * mit Notch bzw. Dynamic Island.
+ * mit Dynamic Island.
  */
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#030712",
+  themeColor: "#0f1a3d",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="de"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="de" className={`${pixelFont.variable} h-full`}>
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );

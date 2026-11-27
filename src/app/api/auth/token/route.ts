@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   SPOTIFY_CONFIG,
+  getMissingSpotifyConfig,
   getSpotifyAuthorizationHeader,
-  validateSpotifyConfig,
 } from "@/lib/spotify/auth";
 
 /**
@@ -17,6 +17,35 @@ type SpotifyRefreshResponse = {
   refresh_token?: string;
 };
 
+const isProduction = process.env.NODE_ENV === "production";
+
+/**
+ * Einheitliche Optionen für alle Auth-Cookies.
+ */
+function cookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge,
+  };
+}
+
+/**
+ * JSON-Antwort, die niemals zwischengespeichert wird.
+ */
+function jsonNoStore(
+  body: Record<string, unknown>,
+  status = 200,
+): NextResponse {
+  const response = NextResponse.json(body, { status });
+
+  response.headers.set("Cache-Control", "no-store");
+
+  return response;
+}
+
 /**
  * Gibt einen gültigen Access Token zurück.
  *
@@ -25,82 +54,84 @@ type SpotifyRefreshResponse = {
  * Falls der vorhandene Access Token abgelaufen ist,
  * wird automatisch ein neuer angefordert.
  */
-export async function GET(
-  request: NextRequest,
-): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  /**
+   * Konfiguration zuerst prüfen, damit eine fehlende
+   * Umgebungsvariable klar benannt wird.
+   */
+  const missing = getMissingSpotifyConfig();
+
+  if (missing.length > 0) {
+    console.error(
+      "Spotify-Konfiguration unvollständig. Fehlend:",
+      missing.join(", "),
+    );
+
+    return jsonNoStore(
+      {
+        code: "config_missing",
+        error: `Server-Konfiguration unvollständig. Fehlende Umgebungsvariablen: ${missing.join(", ")}`,
+      },
+      500,
+    );
+  }
+
   try {
-    validateSpotifyConfig();
+    const accessToken = request.cookies.get("spotify_access_token")?.value;
 
-    const accessToken = request.cookies.get(
-      "spotify_access_token",
-    )?.value;
-
-    const refreshToken = request.cookies.get(
-      "spotify_refresh_token",
-    )?.value;
+    const refreshToken = request.cookies.get("spotify_refresh_token")?.value;
 
     const expiresAt = Number(
-      request.cookies.get(
-        "spotify_token_expires_at",
-      )?.value ?? 0,
+      request.cookies.get("spotify_token_expires_at")?.value ?? 0,
     );
 
     /**
-     * Prüfen, ob ein gültiger Access Token existiert.
+     * Gültigen Access Token direkt zurückgeben.
      *
-     * Wir erneuern den Token bereits 60 Sekunden
-     * vor seinem eigentlichen Ablauf.
+     * Erneuerung erfolgt bereits 60 Sekunden
+     * vor dem eigentlichen Ablauf.
      */
-    if (
-      accessToken &&
-      expiresAt > Date.now() + 60_000
-    ) {
-      const response = NextResponse.json({
+    if (accessToken && expiresAt > Date.now() + 60_000) {
+      return jsonNoStore({
         access_token: accessToken,
         expires_at: expiresAt,
       });
-
-      response.headers.set("Cache-Control", "no-store");
-
-      return response;
     }
 
     /**
      * Ohne Refresh Token ist eine erneute Anmeldung notwendig.
+     * Das ist kein Fehler, sondern der normale Zustand
+     * vor dem ersten Login.
      */
     if (!refreshToken) {
-      return NextResponse.json(
+      return jsonNoStore(
         {
           authenticated: false,
+          code: "not_authenticated",
           error: "Keine gültige Spotify-Sitzung vorhanden.",
         },
-        {
-          status: 401,
-        },
+        401,
       );
     }
 
     /**
      * Neuen Access Token über den Refresh Token anfordern.
      */
-    const refreshResponse = await fetch(
-      SPOTIFY_CONFIG.tokenUrl,
-      {
-        method: "POST",
+    const refreshResponse = await fetch(SPOTIFY_CONFIG.tokenUrl, {
+      method: "POST",
 
-        headers: {
-          Authorization: getSpotifyAuthorizationHeader(),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-        }),
-
-        cache: "no-store",
+      headers: {
+        Authorization: getSpotifyAuthorizationHeader(),
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-    );
+
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+
+      cache: "no-store",
+    });
 
     if (!refreshResponse.ok) {
       console.error(
@@ -108,14 +139,13 @@ export async function GET(
         refreshResponse.status,
       );
 
-      const response = NextResponse.json(
+      const response = jsonNoStore(
         {
           authenticated: false,
-          error: "Spotify-Sitzung konnte nicht erneuert werden.",
+          code: "refresh_failed",
+          error: "Spotify-Sitzung abgelaufen. Bitte melde dich erneut an.",
         },
-        {
-          status: 401,
-        },
+        401,
       );
 
       response.cookies.delete("spotify_access_token");
@@ -125,72 +155,40 @@ export async function GET(
       return response;
     }
 
-    const tokens =
-      (await refreshResponse.json()) as SpotifyRefreshResponse;
+    const tokens = (await refreshResponse.json()) as SpotifyRefreshResponse;
 
-    const newExpiresAt =
-      Date.now() + tokens.expires_in * 1000;
+    const newExpiresAt = Date.now() + tokens.expires_in * 1000;
 
     /**
      * Access Token an das Frontend zurückgeben.
-     *
-     * Das Frontend erhält den Token im JSON-Response.
-     * Der Refresh Token bleibt serverseitig.
+     * Der Refresh Token bleibt serverseitig im HttpOnly-Cookie.
      */
-    const response = NextResponse.json({
+    const response = jsonNoStore({
       access_token: tokens.access_token,
       expires_at: newExpiresAt,
     });
 
-    response.headers.set("Cache-Control", "no-store");
-
-    /**
-     * Neuen Access Token speichern.
-     */
     response.cookies.set(
       "spotify_access_token",
       tokens.access_token,
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: tokens.expires_in,
-      },
+      cookieOptions(tokens.expires_in),
     );
 
-    /**
-     * Ablaufzeit aktualisieren.
-     */
     response.cookies.set(
       "spotify_token_expires_at",
       String(newExpiresAt),
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: tokens.expires_in,
-      },
+      cookieOptions(tokens.expires_in),
     );
 
     /**
-     * Spotify kann bei einer Token-Erneuerung
-     * einen neuen Refresh Token zurückgeben.
-     *
+     * Spotify kann einen neuen Refresh Token mitschicken.
      * Falls nicht, bleibt der bisherige erhalten.
      */
     if (tokens.refresh_token) {
       response.cookies.set(
         "spotify_refresh_token",
         tokens.refresh_token,
-        {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          path: "/",
-          maxAge: 365 * 24 * 60 * 60,
-        },
+        cookieOptions(365 * 24 * 60 * 60),
       );
     }
 
@@ -198,13 +196,13 @@ export async function GET(
   } catch (error) {
     console.error("Spotify Token Route Fehler:", error);
 
-    return NextResponse.json(
+    return jsonNoStore(
       {
-        error: "Spotify-Token konnte nicht abgerufen werden.",
+        code: "server_error",
+        error:
+          "Spotify ist gerade nicht erreichbar. Bitte versuche es gleich noch einmal.",
       },
-      {
-        status: 500,
-      },
+      502,
     );
   }
 }

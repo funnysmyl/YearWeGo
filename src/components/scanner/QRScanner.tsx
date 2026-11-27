@@ -12,11 +12,35 @@ type QRScannerProps = {
   onClose?: () => void;
 };
 
-export default function QRScanner({
-  onScan,
-  onError,
-  onClose,
-}: QRScannerProps) {
+/**
+ * Übersetzt technische Kamera-Fehler in verständliche Meldungen.
+ *
+ * html5-qrcode liefert teils Error-Objekte, teils Strings.
+ */
+function getCameraErrorMessage(err: unknown): string {
+  const text =
+    err instanceof Error ? `${err.name} ${err.message}` : String(err);
+
+  if (/NotAllowed|Permission/i.test(text)) {
+    return "Kamerazugriff wurde verweigert. Erlaube die Kamera in den Einstellungen (iPhone: Einstellungen → Apps → Safari → Kamera) und lade die Seite neu.";
+  }
+
+  if (/NotFound|device not found/i.test(text)) {
+    return "Es wurde keine Kamera gefunden.";
+  }
+
+  if (/NotReadable|Could not start video/i.test(text)) {
+    return "Die Kamera wird gerade von einer anderen App verwendet.";
+  }
+
+  if (/secure|https/i.test(text)) {
+    return "Die Kamera funktioniert nur über eine sichere HTTPS-Verbindung.";
+  }
+
+  return "Die Kamera konnte nicht gestartet werden.";
+}
+
+export default function QRScanner({ onScan, onError, onClose }: QRScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const scannerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -25,13 +49,18 @@ export default function QRScanner({
 
   const onErrorRef = useRef(onError);
 
+  /**
+   * Als Ref statt State, damit der Scan-Callback immer
+   * den aktuellen Wert sieht und eine Karte nicht
+   * mehrfach gemeldet wird.
+   */
+  const hasScannedRef = useRef(false);
+
   const [isScanning, setIsScanning] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
-
-  const [hasScanned, setHasScanned] = useState(false);
 
   /**
    * Callback-Referenzen aktuell halten.
@@ -74,9 +103,7 @@ export default function QRScanner({
     } catch (err) {
       console.error("QR-Scanner konnte nicht gestoppt werden:", err);
 
-      handleError(
-        "Der QR-Code-Scanner konnte nicht vollständig beendet werden.",
-      );
+      handleError("Der Scanner konnte nicht vollständig beendet werden.");
     }
   }, [handleError]);
 
@@ -90,14 +117,15 @@ export default function QRScanner({
 
     setIsLoading(true);
     setError(null);
-    setHasScanned(false);
+
+    hasScannedRef.current = false;
 
     try {
       if (!scannerContainerRef.current) {
         throw new Error("Scanner-Element wurde nicht gefunden.");
       }
 
-      const scanner = new Html5Qrcode("hitster-qr-reader");
+      const scanner = new Html5Qrcode("yearwego-qr-reader");
 
       scannerRef.current = scanner;
 
@@ -111,35 +139,27 @@ export default function QRScanner({
       };
 
       /**
-       * Rückkamera bevorzugen.
-       *
-       * "environment" wählt auf Smartphones normalerweise
-       * die rückseitige Kamera.
+       * "environment" wählt auf Smartphones
+       * normalerweise die Rückkamera.
        */
       await scanner.start(
         { facingMode: "environment" },
         config,
         async (decodedText) => {
-          if (hasScanned) {
+          if (hasScannedRef.current) {
             return;
           }
 
-          setHasScanned(true);
+          hasScannedRef.current = true;
 
-          /**
-           * Scanner sofort stoppen.
-           */
           await stopScanner();
 
-          /**
-           * Erkannte QR-Code-Daten weitergeben.
-           */
           onScanRef.current(decodedText);
         },
         () => {
           /**
            * Fehlgeschlagene Einzelversuche beim Scannen
-           * sind normal und werden deshalb ignoriert.
+           * sind normal und werden ignoriert.
            */
         },
       );
@@ -148,18 +168,13 @@ export default function QRScanner({
     } catch (err) {
       console.error("QR-Scanner Fehler:", err);
 
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Kamera konnte nicht gestartet werden.";
-
-      handleError(message);
+      handleError(getCameraErrorMessage(err));
 
       await stopScanner();
     } finally {
       setIsLoading(false);
     }
-  }, [hasScanned, handleError, isLoading, isScanning, stopScanner]);
+  }, [handleError, isLoading, isScanning, stopScanner]);
 
   /**
    * Scanner beim Verlassen der Komponente aufräumen.
@@ -186,54 +201,43 @@ export default function QRScanner({
   };
 
   return (
-    <div className="w-full max-w-lg rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-xl">
+    <div className="px-panel p-6">
       <div className="mb-5 text-center">
-        <h2 className="text-xl font-bold text-white">
-          Karte scannen
-        </h2>
+        <h2 className="px-heading text-xl">Karte scannen</h2>
 
-        <p className="mt-2 text-sm text-gray-400">
-          Richte deine Kamera auf den QR-Code deiner Hitster-Karte.
+        <p className="mt-2 text-sm text-mist">
+          Halte die Kamera auf den QR-Code deiner Karte.
         </p>
       </div>
 
       <div
         ref={scannerContainerRef}
-        id="hitster-qr-reader"
-        className="min-h-[280px] w-full overflow-hidden rounded-xl bg-black"
+        id="yearwego-qr-reader"
+        className="px-slot min-h-[280px] w-full overflow-hidden bg-black"
       />
 
       {error && (
-        <div
-          role="alert"
-          className="mt-4 rounded-lg border border-red-800 bg-red-950/40 p-3 text-sm text-red-400"
-        >
+        <div role="alert" className="px-alert mt-5 p-4 text-sm">
           {error}
         </div>
       )}
 
-      <div className="mt-5 flex flex-col gap-3">
+      <div className="mt-7 flex flex-col gap-5">
         {!isScanning ? (
           <button
             onClick={startScanner}
             disabled={isLoading}
-            className="w-full rounded-lg bg-green-500 px-4 py-3 font-semibold text-black transition hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="px-btn px-btn-grass"
           >
-            {isLoading ? "Kamera wird gestartet ..." : "Kamera starten"}
+            {isLoading ? "Kamera startet …" : "Kamera starten"}
           </button>
         ) : (
-          <button
-            onClick={stopScanner}
-            className="w-full rounded-lg border border-gray-600 px-4 py-3 font-medium text-white transition hover:bg-gray-800"
-          >
+          <button onClick={stopScanner} className="px-btn px-btn-stone">
             Scannen abbrechen
           </button>
         )}
 
-        <button
-          onClick={handleClose}
-          className="w-full rounded-lg px-4 py-2 text-sm text-gray-400 transition hover:text-white"
-        >
+        <button onClick={handleClose} className="px-btn px-btn-wood px-btn-small">
           Schließen
         </button>
       </div>

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   SPOTIFY_CONFIG,
+  getMissingSpotifyConfig,
   getSpotifyAuthorizationHeader,
-  validateSpotifyConfig,
 } from "@/lib/spotify/auth";
 
 /**
@@ -17,91 +17,115 @@ type SpotifyTokenResponse = {
   refresh_token: string;
 };
 
+const isProduction = process.env.NODE_ENV === "production";
+
+/**
+ * Einheitliche Optionen für alle Auth-Cookies.
+ */
+function cookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge,
+  };
+}
+
+/**
+ * Entfernt den temporären OAuth-State.
+ *
+ * Wichtig: Der Pfad muss exakt dem Pfad beim Setzen
+ * entsprechen ("/api/auth"), sonst wird das Cookie
+ * nicht gelöscht.
+ */
+function clearStateCookie(response: NextResponse): void {
+  response.cookies.set("spotify_auth_state", "", {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "lax",
+    path: "/api/auth",
+    maxAge: 0,
+  });
+}
+
+/**
+ * Leitet mit einem Fehlercode zurück zur Startseite.
+ */
+function redirectWithAuthError(
+  request: NextRequest,
+  code: string,
+): NextResponse {
+  const response = NextResponse.redirect(
+    new URL(`/?authError=${encodeURIComponent(code)}`, request.url),
+  );
+
+  clearStateCookie(response);
+
+  return response;
+}
+
 /**
  * Verarbeitet die Rückkehr von Spotify.
  *
  * GET /api/auth/callback
  */
-export async function GET(
-  request: NextRequest,
-): Promise<NextResponse> {
-  try {
-    validateSpotifyConfig();
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (getMissingSpotifyConfig().length > 0) {
+    return redirectWithAuthError(request, "config_missing");
+  }
 
+  try {
     const searchParams = request.nextUrl.searchParams;
 
     const code = searchParams.get("code");
     const returnedState = searchParams.get("state");
     const spotifyError = searchParams.get("error");
 
-    const savedState = request.cookies.get(
-      "spotify_auth_state",
-    )?.value;
+    const savedState = request.cookies.get("spotify_auth_state")?.value;
 
     /**
-     * Prüfen, ob Spotify einen Fehler zurückgegeben hat.
+     * Spotify hat einen Fehler zurückgegeben,
+     * z. B. "access_denied" bei Abbruch durch die Person.
      */
     if (spotifyError) {
-      return NextResponse.redirect(
-        new URL(
-          `/?authError=${encodeURIComponent(spotifyError)}`,
-          request.url,
-        ),
-      );
+      return redirectWithAuthError(request, spotifyError);
     }
 
     /**
-     * Prüfen, ob Authorization Code und State vorhanden sind.
+     * Authorization Code und State müssen vorhanden sein.
      */
     if (!code || !returnedState || !savedState) {
-      return NextResponse.json(
-        {
-          error: "Ungültige Spotify-Callback-Anfrage.",
-        },
-        {
-          status: 400,
-        },
-      );
+      return redirectWithAuthError(request, "invalid_callback");
     }
 
     /**
-     * CSRF-Schutz:
-     * Der zurückgegebene State muss mit dem gespeicherten
-     * State übereinstimmen.
+     * CSRF-Schutz: zurückgegebener und gespeicherter
+     * State müssen übereinstimmen.
      */
     if (returnedState !== savedState) {
-      return NextResponse.json(
-        {
-          error: "Spotify State stimmt nicht überein.",
-        },
-        {
-          status: 403,
-        },
-      );
+      return redirectWithAuthError(request, "state_mismatch");
     }
 
     /**
      * Authorization Code gegen Access Token tauschen.
      */
-    const tokenResponse = await fetch(
-      SPOTIFY_CONFIG.tokenUrl,
-      {
-        method: "POST",
+    const tokenResponse = await fetch(SPOTIFY_CONFIG.tokenUrl, {
+      method: "POST",
 
-        headers: {
-          Authorization: getSpotifyAuthorizationHeader(),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: SPOTIFY_CONFIG.redirectUri!,
-        }),
-
-        cache: "no-store",
+      headers: {
+        Authorization: getSpotifyAuthorizationHeader(),
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-    );
+
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: SPOTIFY_CONFIG.redirectUri!,
+      }),
+
+      cache: "no-store",
+    });
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
@@ -112,93 +136,42 @@ export async function GET(
         errorText,
       );
 
-      return NextResponse.json(
-        {
-          error: "Spotify-Token konnte nicht abgerufen werden.",
-        },
-        {
-          status: 502,
-        },
-      );
+      return redirectWithAuthError(request, "token_exchange_failed");
     }
 
-    const tokens =
-      (await tokenResponse.json()) as SpotifyTokenResponse;
+    const tokens = (await tokenResponse.json()) as SpotifyTokenResponse;
+
+    const expiresAt = Date.now() + tokens.expires_in * 1000;
 
     /**
-     * Ablaufzeit des Access Tokens berechnen.
+     * Erfolgreich: zurück zur Startseite.
      */
-    const expiresAt =
-      Date.now() + tokens.expires_in * 1000;
+    const response = NextResponse.redirect(new URL("/", request.url));
 
-    /**
-     * Zurück zur Startseite.
-     */
-    const response = NextResponse.redirect(
-      new URL("/", request.url),
-    );
-
-    /**
-     * Access Token als HttpOnly-Cookie speichern.
-     */
     response.cookies.set(
       "spotify_access_token",
       tokens.access_token,
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: tokens.expires_in,
-      },
+      cookieOptions(tokens.expires_in),
     );
 
-    /**
-     * Refresh Token ebenfalls geschützt speichern.
-     */
     response.cookies.set(
       "spotify_refresh_token",
       tokens.refresh_token,
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: 365 * 24 * 60 * 60,
-      },
+      cookieOptions(365 * 24 * 60 * 60),
     );
 
-    /**
-     * Ablaufzeit separat speichern.
-     */
     response.cookies.set(
       "spotify_token_expires_at",
       String(expiresAt),
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: tokens.expires_in,
-      },
+      cookieOptions(tokens.expires_in),
     );
 
-    /**
-     * Temporären OAuth-State entfernen.
-     */
-    response.cookies.delete("spotify_auth_state");
+    clearStateCookie(response);
 
     return response;
   } catch (error) {
     console.error("Spotify Callback Fehler:", error);
 
-    return NextResponse.json(
-      {
-        error: "Spotify-Authentifizierung fehlgeschlagen.",
-      },
-      {
-        status: 500,
-      },
-    );
+    return redirectWithAuthError(request, "server_error");
   }
 }
