@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@spotify/web-api-ts-sdk": "^1.2.0",
-    "@types/spotify-web-playback-sdk": "^0.1.19",
     "html5-qrcode": "^2.3.8",
     "next": "16.4.6",
     "react": "19.3.0",

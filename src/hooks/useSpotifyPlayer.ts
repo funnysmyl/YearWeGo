@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type PlayerStatus =
-  | "idle"
-  | "loading"
-  | "ready"
-  | "not_ready"
-  | "error";
+export type PlayerStatus = "idle" | "loading" | "ready" | "not_ready" | "error";
 
 type UseSpotifyPlayerReturn = {
   player: SpotifyWebPlaybackPlayer | null;
@@ -18,6 +13,21 @@ type UseSpotifyPlayerReturn = {
   disconnectPlayer: () => void;
 };
 
+const SDK_URL = "https://sdk.scdn.co/spotify-player.js";
+
+/**
+ * Verständliche Meldungen für die Fehler-Ereignisse des SDK.
+ * Die technische Originalmeldung landet zusätzlich in der Konsole.
+ */
+const PLAYER_ERROR_MESSAGES: Record<SpotifyPlayerErrorEvent, string> = {
+  initialization_error:
+    "Der Spotify-Player konnte in diesem Browser nicht gestartet werden.",
+  authentication_error:
+    "Spotify hat den Player nicht zugelassen. Bitte melde dich ab und erneut an.",
+  account_error: "Für die Wiedergabe wird ein Spotify-Premium-Konto benötigt.",
+  playback_error: "Der Song konnte nicht abgespielt werden.",
+};
+
 export function useSpotifyPlayer(
   accessToken: string | null,
 ): UseSpotifyPlayerReturn {
@@ -25,8 +35,7 @@ export function useSpotifyPlayer(
 
   const accessTokenRef = useRef<string | null>(accessToken);
 
-  const [player, setPlayer] =
-    useState<SpotifyWebPlaybackPlayer | null>(null);
+  const [player, setPlayer] = useState<SpotifyWebPlaybackPlayer | null>(null);
 
   const [deviceId, setDeviceId] = useState<string | null>(null);
 
@@ -37,7 +46,7 @@ export function useSpotifyPlayer(
   /**
    * Access Token aktuell halten.
    *
-   * Das SDK kann den Callback auch später erneut aufrufen.
+   * Das SDK kann den Token-Callback auch später erneut aufrufen.
    */
   useEffect(() => {
     accessTokenRef.current = accessToken;
@@ -53,12 +62,11 @@ export function useSpotifyPlayer(
 
     await new Promise<void>((resolve, reject) => {
       const existingScript = document.querySelector<HTMLScriptElement>(
-        'script[src="https://sdk.scdn.co/spotify-player.js"]',
+        `script[src="${SDK_URL}"]`,
       );
 
       if (existingScript) {
-        const previousCallback =
-          window.onSpotifyWebPlaybackSDKReady;
+        const previousCallback = window.onSpotifyWebPlaybackSDKReady;
 
         window.onSpotifyWebPlaybackSDKReady = () => {
           previousCallback?.();
@@ -80,12 +88,14 @@ export function useSpotifyPlayer(
 
       const script = document.createElement("script");
 
-      script.src = "https://sdk.scdn.co/spotify-player.js";
+      script.src = SDK_URL;
       script.async = true;
 
       script.onerror = () => {
         reject(
-          new Error("Spotify Web Playback SDK konnte nicht geladen werden."),
+          new Error(
+            "Spotify-Player konnte nicht geladen werden. Prüfe deine Internetverbindung.",
+          ),
         );
       };
 
@@ -98,7 +108,7 @@ export function useSpotifyPlayer(
    */
   const initializePlayer = useCallback(async (): Promise<void> => {
     if (!accessTokenRef.current) {
-      setError("Kein Spotify Access Token vorhanden.");
+      setError("Bitte melde dich zuerst bei Spotify an.");
       setStatus("error");
       return;
     }
@@ -114,11 +124,11 @@ export function useSpotifyPlayer(
       await loadSpotifySDK();
 
       if (!window.Spotify) {
-        throw new Error("Spotify SDK ist nicht verfügbar.");
+        throw new Error("Spotify-Player ist nicht verfügbar.");
       }
 
       const newPlayer = new window.Spotify.Player({
-        name: "Hitster DIY Player",
+        name: "YearWeGo Player",
 
         volume: 0.5,
 
@@ -133,68 +143,73 @@ export function useSpotifyPlayer(
             });
 
             if (!response.ok) {
-              throw new Error("Spotify Token konnte nicht geladen werden.");
+              throw new Error(`Token-Abruf fehlgeschlagen (HTTP ${response.status})`);
             }
 
-            const data = await response.json();
+            const data = (await response.json()) as { access_token?: string };
+
+            if (!data.access_token) {
+              throw new Error("Antwort enthielt keinen Access Token.");
+            }
 
             accessTokenRef.current = data.access_token;
 
             callback(data.access_token);
           } catch (err) {
+            /**
+             * Ohne Token kann das SDK nicht weiterarbeiten.
+             * Status sichtbar auf Fehler setzen, statt
+             * dauerhaft "Wird gestartet …" anzuzeigen.
+             */
             console.error("Spotify Token Fehler:", err);
-            setError("Spotify-Authentifizierung fehlgeschlagen.");
+
+            setError("Spotify-Sitzung abgelaufen. Bitte melde dich erneut an.");
+            setStatus("error");
           }
         },
       });
 
-      newPlayer.addListener("ready", ({ device_id }: { device_id: string }) => {
+      newPlayer.addListener("ready", ({ device_id }) => {
         setDeviceId(device_id);
+        setError(null);
         setStatus("ready");
       });
 
-      newPlayer.addListener(
-        "not_ready",
-        ({ device_id }: { device_id: string }) => {
-          setDeviceId(null);
-          setStatus("not_ready");
+      newPlayer.addListener("not_ready", ({ device_id }) => {
+        console.warn("Spotify Player offline:", device_id);
 
-          console.warn("Spotify Player offline:", device_id);
-        },
-      );
+        setDeviceId(null);
+        setStatus("not_ready");
+      });
 
-      newPlayer.addListener(
+      const errorEvents: SpotifyPlayerErrorEvent[] = [
         "initialization_error",
-        ({ message }: { message: string }) => {
-          setError(message);
-          setStatus("error");
-        },
-      );
-
-      newPlayer.addListener(
         "authentication_error",
-        ({ message }: { message: string }) => {
-          setError(message);
-          setStatus("error");
-        },
-      );
-
-      newPlayer.addListener(
         "account_error",
-        ({ message }: { message: string }) => {
-          setError(message);
-          setStatus("error");
-        },
-      );
+        "playback_error",
+      ];
 
-      newPlayer.addListener(
-        "autoplay_failed",
-        () => {
-          setError(
-            "Der Browser hat die automatische Wiedergabe blockiert. Bitte interagiere mit der Seite.",
-          );
-        },
-      );
+      for (const eventName of errorEvents) {
+        newPlayer.addListener(eventName, ({ message }) => {
+          console.error(`Spotify ${eventName}:`, message);
+
+          setError(PLAYER_ERROR_MESSAGES[eventName]);
+
+          /**
+           * Ein Wiedergabefehler betrifft nur den einzelnen Song,
+           * der Player selbst bleibt einsatzbereit.
+           */
+          if (eventName !== "playback_error") {
+            setStatus("error");
+          }
+        });
+      }
+
+      newPlayer.addListener("autoplay_failed", () => {
+        setError(
+          "Der Browser hat die automatische Wiedergabe blockiert. Tippe bitte erneut auf Abspielen.",
+        );
+      });
 
       playerRef.current = newPlayer;
 
@@ -203,14 +218,16 @@ export function useSpotifyPlayer(
       const connected = await newPlayer.connect();
 
       if (!connected) {
-        throw new Error("Verbindung zum Spotify Player fehlgeschlagen.");
+        throw new Error("Verbindung zum Spotify-Player fehlgeschlagen.");
       }
     } catch (err) {
       const message =
-        err instanceof Error
-          ? err.message
-          : "Unbekannter Spotify Player Fehler.";
+        err instanceof Error ? err.message : "Unbekannter Fehler im Spotify-Player.";
 
+      playerRef.current?.disconnect();
+      playerRef.current = null;
+
+      setPlayer(null);
       setError(message);
       setStatus("error");
     }
