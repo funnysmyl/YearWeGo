@@ -33,6 +33,25 @@ const PLAYER_STATUS = {
   error: { label: "Fehler", color: "#c43c35" },
 } as const;
 
+/**
+ * Maximale Länge, mit der ein gelesener QR-Inhalt
+ * in einer Fehlermeldung angezeigt wird.
+ */
+const MAX_SHOWN_CODE_LENGTH = 80;
+
+/**
+ * Kürzt den gelesenen QR-Inhalt für die Anzeige.
+ */
+function shortenScannedText(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+
+  if (trimmed.length <= MAX_SHOWN_CODE_LENGTH) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, MAX_SHOWN_CODE_LENGTH)}…`;
+}
+
 export default function Home() {
   /**
    * Einzige Instanz des Auth-Hooks.
@@ -113,7 +132,14 @@ export default function Home() {
 
     switch (parsed.kind) {
       case "invalid":
-        rejectCode(decodedText, parsed.reason);
+        /**
+         * Gelesenen Inhalt mit anzeigen, damit z. B. Weiterleitungs-Links
+         * von QR-Generatoren sofort erkennbar sind.
+         */
+        rejectCode(
+          decodedText,
+          `${parsed.reason} Gelesen: „${shortenScannedText(decodedText)}“`,
+        );
         return false;
 
       case "spotify":
@@ -257,7 +283,7 @@ export default function Home() {
           {auth.isAuthenticated && game.phase === "scanning" && (
             <section className="flex flex-col gap-5">
               {game.errorMessage && (
-                <div role="alert" className="px-alert p-4 text-sm">
+                <div role="alert" className="px-alert p-4 text-sm break-all">
                   {game.errorMessage}
                 </div>
               )}
