@@ -77,25 +77,68 @@ async function spotifyFetch(
 
 /**
  * Liest die Fehlermeldung aus einer Spotify-Antwort.
+ *
+ * Spotify liefert z. B.:
+ * { "error": { "status": 403, "message": "…", "reason": "PREMIUM_REQUIRED" } }
  */
 async function readSpotifyErrorDetail(response: Response): Promise<string> {
   try {
-    const data = (await response.json()) as {
-      error?: { message?: string; reason?: string };
-    };
+    const text = await response.text();
 
-    return `${data.error?.reason ?? ""} ${data.error?.message ?? ""}`.trim();
+    if (!text) {
+      return "";
+    }
+
+    try {
+      const data = JSON.parse(text) as {
+        error?: { message?: string; reason?: string } | string;
+        error_description?: string;
+      };
+
+      if (typeof data.error === "string") {
+        return `${data.error} ${data.error_description ?? ""}`.trim();
+      }
+
+      return `${data.error?.reason ?? ""} ${data.error?.message ?? ""}`.trim();
+    } catch {
+      /**
+       * Keine JSON-Antwort, z. B. reiner Text.
+       */
+      return text.slice(0, 200).trim();
+    }
   } catch {
     return "";
   }
 }
 
 /**
- * Übersetzt HTTP-Statuscodes der Wiedergabe in verständliche Meldungen.
+ * Hängt die Originalmeldung von Spotify an, falls vorhanden.
+ */
+function withDetail(message: string, detail: string): string {
+  return detail ? `${message} (Spotify: ${detail})` : message;
+}
+
+/**
+ * Übersetzt Fehler der Wiedergabe in verständliche Meldungen.
  */
 function describePlaybackError(status: number, detail: string): string {
+  /**
+   * Development Mode: Konto ist nicht im Spotify-Dashboard
+   * unter "User Management" eingetragen.
+   */
+  if (/not be registered|not registered|user management/i.test(detail)) {
+    return "Dieses Spotify-Konto ist für die App nicht freigeschaltet. Es muss im Spotify-Dashboard unter „User Management“ eingetragen werden.";
+  }
+
+  if (/premium/i.test(detail)) {
+    return "Für die Wiedergabe wird ein Spotify-Premium-Konto benötigt.";
+  }
+
   if (status === 400) {
-    return "Spotify konnte den Song nicht laden. Prüfe den Link auf dieser Karte.";
+    return withDetail(
+      "Spotify konnte den Song nicht laden. Prüfe den Link auf dieser Karte.",
+      detail,
+    );
   }
 
   if (status === 401) {
@@ -103,11 +146,14 @@ function describePlaybackError(status: number, detail: string): string {
   }
 
   if (status === 403) {
-    if (/premium/i.test(detail)) {
-      return "Für die Wiedergabe wird ein Spotify-Premium-Konto benötigt.";
+    if (/restriction/i.test(detail)) {
+      return "Spotify hat den Befehl blockiert. Lade die Seite neu und versuche es erneut.";
     }
 
-    return "Spotify erlaubt die Wiedergabe dieses Songs gerade nicht.";
+    return withDetail(
+      "Spotify erlaubt die Wiedergabe dieses Songs gerade nicht.",
+      detail,
+    );
   }
 
   if (status === 404) {
@@ -122,7 +168,7 @@ function describePlaybackError(status: number, detail: string): string {
     return "Spotify hat gerade technische Probleme. Bitte gleich noch einmal versuchen.";
   }
 
-  return `Spotify-Fehler (HTTP ${status}).`;
+  return withDetail(`Spotify-Fehler (HTTP ${status}).`, detail);
 }
 
 async function throwPlaybackError(response: Response): Promise<never> {
